@@ -169,10 +169,8 @@ void f_normal_gibbs( const arma::uvec &nControls, const arma::uvec &Timings, con
       
       /* Draw the new value */
       f_new = rueMVnorm( f_mu, f_prec, f.slice(d).row(t).t() );
-      if ( f_new.n_elem != 0) {
-        for (p=0 ; p<P ; p++) {
+      for (p=0 ; p<P ; p++) {
           f(t,p,d) = f_new(p);
-        }
       }
       
     } /* End of loop for time points */
