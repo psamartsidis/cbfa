@@ -85,9 +85,9 @@ arma::vec rueMVnorm(const arma::vec &b, const arma::mat &Q0, const arma::vec &or
 arma::umat offset_save( const arma::ucube &n, const arma::uvec &Timings )
 {
   int nUnits = n.n_cols;
-  int nTimes = n.n_rows;
   int D      = n.n_slices;
-  int d, t, i;
+  int d, i;
+  unsigned int t;
   
   /* Find out how many PG variables are drawn in total */
   int offset_n = 0;
@@ -145,7 +145,7 @@ arma::umat offset_save( const arma::ucube &n, const arma::uvec &Timings )
 
 void save_state( int mcmc_idx, const arma::umat &omega_idx, const arma::cube &omega, arma::mat &omega_mcmc,
                  const arma::vec &xi, arma::mat &xi_mcmc, const arma::umat &crt_idx, const arma::ucube &crt, arma::umat &crt_mcmc,
-                 const arma::cube &f_binom, arma::cube & f_binom_mcmc,  const arma::cube &f_negbin, arma::cube &f_negbin_mcmc, 
+                 const arma::cube &f_binom, arma::cube &f_binom_mcmc,  const arma::cube &f_negbin, arma::cube &f_negbin_mcmc, 
                  const arma::cube &f_normal, arma::cube &f_normal_mcmc, const arma::mat &sigma, arma::cube &sigma_mcmc,
                  const arma::mat &psi_normal, const arma::mat &psi_binom, const arma::mat &psi_negbin, arma::cube &psi_mcmc,
                  const arma::mat &L, arma::cube &L_mcmc, const arma::vec &tau, arma::mat &tau_mcmc, const arma::vec &phi, 
@@ -241,6 +241,83 @@ void save_state( int mcmc_idx, const arma::umat &omega_idx, const arma::cube &om
 
 
 
+void save_state_conjugate( int mcmc_idx, const arma::umat &omega_idx, const arma::cube &omega, arma::mat &omega_mcmc, const arma::mat &beta_normal, 
+                           arma::cube &beta_normal_mcmc, const arma::mat &beta_binom, arma::cube &beta_binom_mcmc, const arma::cube &f_binom, 
+                           arma::cube &f_binom_mcmc, const arma::cube &f_normal, arma::cube &f_normal_mcmc, const arma::mat &sigma, arma::cube &sigma_mcmc, 
+                           const arma::mat &psi_normal, const arma::mat &psi_binom, arma::cube &psi_mcmc, const arma::mat &L, arma::cube &L_mcmc, 
+                           const arma::vec &tau, arma::mat &tau_mcmc, const arma::vec &phi, arma::mat &phi_mcmc, double eta, arma::vec &eta_mcmc, double gamma, 
+                           arma::vec &gamma_mcmc )
+{
+  int i, t, p, d, idx;
+  int omega_n = omega_idx.n_rows;
+  int P       = f_binom.n_cols;
+  int nTimes  = f_binom.n_rows;
+  int D1      = f_normal.n_slices;
+  int D2      = f_binom.n_slices;
+
+  
+  /* PG latent variables */
+  for ( i=0 ; i<omega_n ; i++ ) {
+    omega_mcmc(i,mcmc_idx) = omega( omega_idx(i,0), omega_idx(i,1), omega_idx(i,2) );
+  } 
+  
+  /* Normal regression parameters */
+  beta_normal_mcmc.slice(mcmc_idx) = beta_normal;
+  
+  /* Binomial regression coefficients */ 
+  beta_binom_mcmc.slice(mcmc_idx) = beta_binom;
+  
+  /* Binomial factors */
+  for ( d=0 ; d<D2 ; d++ ){
+    idx = d*P;
+    for ( p=0 ; p<P ; p++ ) {
+      for ( t=0 ; t<nTimes ; t++ ) {
+        f_binom_mcmc(t,idx+p,mcmc_idx) = f_binom(t,p,d);
+      }
+    }
+  }
+  
+  /* Normal factors */
+  for ( d=0 ; d<D1 ; d++ ){
+    idx = d*P;
+    for ( p=0 ; p<P ; p++ ) {
+      for ( t=0 ; t<nTimes ; t++ ) {
+        f_normal_mcmc(t,idx+p,mcmc_idx) = f_normal(t,p,d);
+      }
+    }
+  }
+  
+  /* Normal variance parameters */
+  sigma_mcmc.slice(mcmc_idx) = sigma;
+  
+  /* Factor variance parameters */
+  idx = 0;
+  for ( d=0 ; d<D1 ; d++ ){
+    for ( p=0 ; p<P ; p++ ) {
+      psi_mcmc(p,idx,mcmc_idx) = psi_normal(p,d);
+    }
+    idx += 1;
+  }
+  for ( d=0 ; d<D2 ; d++ ){
+    for ( p=0 ; p<P ; p++ ) {
+      psi_mcmc(p,idx,mcmc_idx) = psi_binom(p,d);
+    }
+    idx += 1;
+  }
+  
+  /* Loadings */
+  L_mcmc.slice(mcmc_idx) = L;
+  
+  /* Loadings shrinkage parameters */
+  tau_mcmc.col(mcmc_idx) = tau;
+  phi_mcmc.col(mcmc_idx) = phi;
+  eta_mcmc(mcmc_idx)     = eta;
+  gamma_mcmc(mcmc_idx)   = gamma;
+  
+}
+
+
+
 void update_Lf( const arma::mat &L, const arma::cube &f_normal, const arma::cube &f_binom, 
                 const arma::cube &f_negbin, arma::cube &Lf_normal, arma::cube &Lf_binom, 
                 arma::cube &Lf_negbin )
@@ -261,6 +338,56 @@ void update_Lf( const arma::mat &L, const arma::cube &f_normal, const arma::cube
   /* Count */
   for (d=0 ; d<D3 ; d++) {
     Lf_negbin.slice(d) = f_negbin.slice(d) * L.t();
+  }
+  
+}
+
+
+
+void update_Lf_conjugate( const arma::cube &y, const arma::cube &X, const arma::mat &beta, const arma::mat &L, const arma::cube &f, 
+                          arma::cube &Lf, arma::cube &y_minus_Xb, arma::cube &y_minus_Lf, arma::cube &mu )
+{
+  int D1 = f.n_slices;
+  int J  = X.n_slices;
+  int d, j;
+  int nTimes = X.n_rows;
+  int nUnits = X.n_cols;
+  arma::mat Xb(nTimes,nUnits);
+  
+  for (d=0 ; d<D1 ; d++) {
+    Lf.slice(d) = f.slice(d) * L.t();
+    Xb.fill(0.0);
+    for (j=0 ; j<J ; j++) {
+      Xb += X.slice(j) * beta(j,d);
+    }
+    mu.slice(d)         = Lf.slice(d) + Xb;
+    y_minus_Lf.slice(d) = y.slice(d) - Lf.slice(d);
+    y_minus_Xb.slice(d) = y.slice(d) - Xb;
+  }
+  
+}
+
+
+
+void update_kappa( const arma::cube &omega, const arma::cube &kappa, const arma::cube &X, const arma::mat &beta, const arma::mat &L, 
+                   const arma::cube &f, arma::cube &Lf, arma::cube &kappa_minus_Xb, arma::cube &kappa_minus_Lf, arma::cube &mu )
+{
+  int D2 = f.n_slices;
+  int J  = X.n_slices;
+  int d, j;
+  int nTimes = X.n_rows;
+  int nUnits = X.n_cols;
+  arma::mat Xb(nTimes,nUnits);
+  
+  for (d=0 ; d<D2 ; d++) {
+    Lf.slice(d) = f.slice(d) * L.t();
+    Xb.fill(0.0);
+    for (j=0 ; j<J ; j++) {
+      Xb += X.slice(j) * beta(j,d);
+    }
+    mu.slice(d)         = Lf.slice(d) + Xb;
+    kappa_minus_Lf.slice(d) = kappa.slice(d) - ( omega.slice(d) % Lf.slice(d) );
+    kappa_minus_Xb.slice(d) = kappa.slice(d) - ( omega.slice(d) % Xb );
   }
   
 }
@@ -334,4 +461,153 @@ void acceptance_ratios( int nMCMC, int nBurn, const arma::umat &xi_accept, arma:
   }
   
 
+}
+
+
+
+/* Allocate latent variables to cores: binomial outcomes */
+arma::ucube offset_cores_binomial( const arma::ucube &n, int nCores, const arma::uvec &Timings, arma::uvec &loop  )
+{
+  int D      = n.n_slices;
+  int nUnits = n.n_cols;
+  int i, d;
+  unsigned int t;
+  
+  /* Find how many latent variables will be updated */ 
+  int N = 0; 
+  for( d=0 ; d<D ; d++ ) {
+    for( i=0 ; i<nUnits ; i++ ) {
+      for ( t=0 ; t<Timings(i)-1 ; t++ ) {
+        if ( n(t,i,d)>0 ) {
+          N += 1;
+        }
+      }
+    }
+  }
+  
+  /* Save the indices and offset size */
+  int idx = 0;
+  arma::umat info( N, 4, fill::value(0) ); 
+  for( d=0 ; d<D ; d++ ) {
+    for( i=0 ; i<nUnits ; i++ ) {
+      for ( t=0 ; t<Timings(i)-1 ; t++ ) {
+        if ( n(t,i,d)>0 ) {
+          info(idx,0) = d;
+          info(idx,1) = i;
+          info(idx,2) = t;
+          info(idx,3) = n(t,i,d);
+          idx        += 1;
+        }
+      }
+    }
+  }
+  
+  /* Sort by offset */
+  arma::uvec idx_sorted = sort_index( info.col(info.n_cols-1) );
+  arma::umat info_sorted(N,4);
+  for (i=0 ; i<N ; i++) {
+    idx = idx_sorted(i);
+    info_sorted(i,0) = info(idx,0);
+    info_sorted(i,1) = info(idx,1);
+    info_sorted(i,2) = info(idx,2);
+    info_sorted(i,3) = info(idx,3);
+  }
+  
+  /* Assign updates to cores */
+  int nChunks = ceil( (double) N/nCores );
+  arma::ucube info_chunks( nChunks, 4, nCores, fill::value(0) );
+  arma::uvec core_idx( nCores, fill::value(0) );
+  for ( i=0 ; i<N ; i++ ){
+    idx = i%nCores;
+    t   = core_idx(idx);
+    info_chunks(t,0,idx) = info_sorted(i,0);
+    info_chunks(t,1,idx) = info_sorted(i,1);
+    info_chunks(t,2,idx) = info_sorted(i,2);
+    info_chunks(t,3,idx) = info_sorted(i,3);
+    core_idx(idx)       += 1;
+  }
+  
+  /* Last value of loop for each core */
+  for ( i=0 ; i<nCores ; i++ ) {
+    loop(i) = core_idx(i);
+  }
+  
+  /* Output */
+  return(info_chunks);
+}
+
+
+
+/* Allocate latent variables to cores: count outcomes */
+arma::ucube offset_cores_count( const arma::ucube &w, const arma::ucube &z, int nCores, const arma::uvec &Timings, arma::uvec &loop )
+{
+  int D      = w.n_slices;
+  int nUnits = w.n_cols;
+  int i, d;
+  unsigned int t;
+  
+  /* Find how many latent variables will be updated */ 
+  int N = 0; 
+  for( d=0 ; d<D ; d++ ) {
+    for( i=0 ; i<nUnits ; i++ ) {
+      for ( t=0 ; t<Timings(i)-1 ; t++ ) {
+        if ( w(t,i,d)>0 ) {
+          N += 1;
+        }
+      }
+    }
+  }
+  
+  /* Save the indices and offset size */
+  int idx = 0;
+  arma::umat info( N, 5, fill::value(0) ); 
+  for( d=0 ; d<D ; d++ ) {
+    for( i=0 ; i<nUnits ; i++ ) {
+      for ( t=0 ; t<Timings(i)-1 ; t++ ) {
+        if ( w(t,i,d)>0 ) {
+          info(idx,0) = d;
+          info(idx,1) = i;
+          info(idx,2) = t;
+          info(idx,3) = w(t,i,d);
+          info(idx,4) = z(t,i,d);
+          idx        += 1;
+        }
+      }
+    }
+  }
+  
+  /* Sort by offset */
+  arma::uvec idx_sorted = sort_index( info.col(info.n_cols-1) );
+  arma::umat info_sorted(N,5);
+  for (i=0 ; i<N ; i++) {
+    idx = idx_sorted(i);
+    info_sorted(i,0) = info(idx,0);
+    info_sorted(i,1) = info(idx,1);
+    info_sorted(i,2) = info(idx,2);
+    info_sorted(i,3) = info(idx,3);
+    info_sorted(i,4) = info(idx,4);
+  }
+  
+  /* Assign updates to cores */
+  int nChunks = ceil( (double) N/nCores );
+  arma::ucube info_chunks( nChunks, 5, nCores, fill::value(0) );
+  arma::uvec core_idx( nCores, fill::value(0) );
+  for ( i=0 ; i<N ; i++ ){
+    idx = i%nCores;
+    t   = core_idx(idx);
+    info_chunks(t,0,idx) = info_sorted(i,0);
+    info_chunks(t,1,idx) = info_sorted(i,1);
+    info_chunks(t,2,idx) = info_sorted(i,2);
+    info_chunks(t,3,idx) = info_sorted(i,3);
+    info_chunks(t,4,idx) = info_sorted(i,4);
+    core_idx(idx)       += 1;
+  }
+  
+  /* Last value of loop for each core */
+  for ( i=0 ; i<nCores ; i++ ) {
+    loop(i) = core_idx(i);
+  }
+  
+  /* Output */
+  return(info_chunks);
 }

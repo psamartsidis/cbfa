@@ -3,8 +3,19 @@
 #include "pgcpp.h"
 #include "gigcpp.h"
 #include "utils.h"
+#include "rng.h"
+#include <random>
+#include <vector>
+#include <iostream>
+#ifdef _OPENMP
+  #include <omp.h>
+#else
+  #define omp_get_thread_num() 0
+#endif
 using namespace Rcpp;
 using namespace arma;
+
+// [[Rcpp::plugins(openmp)]]
 
 
 double factor_variance( const arma::vec &, double , double );
@@ -15,7 +26,6 @@ int multinomial_lse (const arma::vec &);
 void pg_gibbs( const arma::ucube &n, const arma::cube &Lf_binom, arma::cube &omega, const arma::uvec &Timings )
 {
   
-  int nTimes = omega.n_rows;
   int nUnits = omega.n_cols;
   int D2     = omega.n_slices;
   int d, t, i;
@@ -32,7 +42,6 @@ void pg_gibbs( const arma::ucube &n, const arma::cube &Lf_binom, arma::cube &ome
     }
   }
   
-  
 }
 
 
@@ -43,7 +52,6 @@ void crt_gibbs( const arma::vec &xi, const arma::uvec &Timings, const arma::ucub
 {
   
   int D      = w.n_slices;
-  int nTimes = w.n_rows;
   int nUnits = w.n_cols;
   double tmp0, tmp2;
   int tmp1;
@@ -183,7 +191,6 @@ void f_normal_gibbs( const arma::uvec &nControls, const arma::uvec &Timings, con
 /* Normal variance parameters */
 void sigma_gibbs( const arma::cube &y, const arma::cube &Lf, const arma::uvec &Timings, arma::mat &sigma, double SMAX )
 {
-  int nTimes = y.n_rows;
   int nUnits = y.n_cols;
   int D      = y.n_slices;
   int i, t, d, nTimesUnit;
@@ -221,7 +228,7 @@ void psi_gibbs( const arma::cube &f_normal, const arma::cube &f_binom, const arm
   int D1     = f_normal.n_slices;
   int D2     = f_binom.n_slices;
   int D3     = f_negbin.n_slices;
-  int d, p, t;
+  int d, p;
   int idx=-1;
   double shape = 0.5*nTimes - 1.0;
   
@@ -287,6 +294,77 @@ double factor_variance( const arma::vec &f, double shape, double psi0 )
 
 
 
+/* Loadings, conjugate model */ 
+void L_gibbs( arma::mat &L, const arma::mat &theta ,const arma::cube &f_normal, const arma::cube &f_binom, const arma::cube &y, 
+              const arma::mat &sigma, const arma::cube &omega, const arma::cube &kappa, const arma::uvec &Timings )
+{
+  int nUnits = L.n_rows;
+  int P      = L.n_cols;
+  int D1     = f_normal.n_slices;
+  int D2     = f_binom.n_slices;
+  int i, t, p, d, nTimesUnit;
+  arma::vec Lmu(P), Lnew(P);
+  arma::mat Lprec(P,P);
+  
+  /* Repeat for all units */
+  for ( i=0 ; i<nUnits ; i++ ){
+    
+    Lmu.fill(0.0);
+    Lprec.fill(0.0);
+    nTimesUnit = Timings(i)-1;
+    arma::mat f_tmp1( P, nTimesUnit );
+    arma::mat f_tmp2( P, nTimesUnit );
+    arma::vec y_tmp( nTimesUnit );
+
+    /* Normal likelihood contribution */
+    for ( d=0 ; d<D1 ; d++ ) {
+      f_tmp1.fill(0.0);
+      f_tmp2.fill(0.0);
+      y_tmp.fill(0.0); 
+      for ( t=0 ; t<nTimesUnit ; t++ ) {
+        y_tmp(t) = y(t,i,d);
+        for ( p=0 ; p<P ; p++ ) {
+          f_tmp1(p,t) = f_normal(t,p,d)/sigma(i,d);
+          f_tmp2(p,t) = f_normal(t,p,d);
+        }
+      }
+      Lprec += f_tmp2 * (f_tmp1.t());
+      Lmu   += f_tmp1 * y_tmp;
+    }
+    
+    /* Binomial likelihood contribution */ 
+    for ( d=0 ; d<D2; d++ ) {
+      f_tmp1.fill(0.0);
+      f_tmp2.fill(0.0);
+      y_tmp.fill(0.0) ;
+      for ( t=0 ; t<nTimesUnit ; t++ ){
+        y_tmp(t)     = kappa(t,i,d);
+        for ( p=0 ; p<P ; p++ ){
+          f_tmp1(p,t) = f_binom(t,p,d)*omega(t,i,d);
+          f_tmp2(p,t) = f_binom(t,p,d);
+        }
+      }
+      Lprec += f_tmp2 * (f_tmp1.t());
+      Lmu   += f_tmp2 * y_tmp;
+    }
+    
+    /* Prior contribution */ 
+    for ( p=0 ; p<P ; p++ ) {
+      Lprec(p,p) += 1.0/theta(i,p);
+    }
+    
+    /* Draw the new value */
+    Lnew = rueMVnorm( Lmu, Lprec, L.row(i).t() );
+    for (p=0 ; p<P ; p++) {
+      L(i,p) = Lnew(p);
+    }
+    
+  } /* End of loop for units */
+  
+}
+    
+ 
+  
 /* TPB shrinkage parameters */
 arma::vec tpb_gibbs( const arma::mat &L, arma::mat &theta, arma::mat &delta, arma::vec &phi, arma::vec &tau, double eta, 
                      double gamma, const arma::vec &tpb_prior )
@@ -362,6 +440,114 @@ arma::vec tpb_gibbs( const arma::mat &L, arma::mat &theta, arma::mat &delta, arm
   
   
   return(output);
+}
+
+
+
+/* Regression coefficients, conjugate model */
+void beta_normal_gibbs( const arma::cube &X, const arma::cube &y, arma::mat &beta, const arma::uvec &Timings, 
+                        const arma::mat &sigma )
+{
+  int J      = X.n_slices; 
+  int nUnits = X.n_cols;
+  int D1     = y.n_slices;
+  int d, i, nTimesUnit, t, j;
+  arma::vec betaMu(J), betaNew(J);
+  arma::mat betaPrec(J,J);
+  
+  
+  /* Repeat for all the outcomes */
+  for ( d=0 ; d<D1 ; d++ ) {
+    
+    betaMu.fill(0.0);
+    betaPrec.fill(0.0);
+    
+    /* Loops over units */ 
+    for ( i=0 ; i<nUnits ; i++ ) {
+      /* Unit data */ 
+      nTimesUnit = Timings(i) - 1;
+      arma::mat X_tmp1(nTimesUnit,J);
+      arma::mat X_tmp2(nTimesUnit,J);
+      arma::vec y_tmp(nTimesUnit); 
+      for ( t=0 ; t<nTimesUnit ; t++ ) {
+        y_tmp(t) = y(t,i,d);
+        for ( j=0 ; j<J ; j++ ) {
+          X_tmp1(t,j) = X(t,i,j);
+        }
+      }
+      X_tmp2 = X_tmp1/sigma(i,d);
+      /* Add to the mean/precision */ 
+      betaMu   += X_tmp2.t() * y_tmp;
+      betaPrec += X_tmp1.t() * X_tmp2;
+    }
+    
+    /* Prior contribution */ 
+    for ( j=0 ; j<J ; j++ ) {
+      betaPrec(j,j) += 0.001;
+    }
+    
+    /* Draw new value */
+    betaNew = rueMVnorm( betaMu, betaPrec, beta.col(d) );
+    for ( j=0 ; j<J ; j++ ) {
+      beta(j,d) = betaNew(j);
+    }
+    
+  } /* End of loop over outcomes */
+  
+}
+
+
+
+/* Regression coefficients, conjugate model */
+void beta_binom_gibbs( const arma::cube &X, const arma::cube &kappa, const arma::cube &omega, arma::mat &beta, 
+                          const arma::uvec &Timings )
+{
+  int J      = X.n_slices; 
+  int nUnits = X.n_cols;
+  int D2     = omega.n_slices;
+  int d, i, nTimesUnit, t, j;
+  arma::vec betaMu(J), betaNew(J);
+  arma::mat betaPrec(J,J);
+  
+  
+  /* Repeat for all the outcomes */
+  for ( d=0 ; d<D2 ; d++ ) {
+    
+    betaMu.fill(0.0);
+    betaPrec.fill(0.0);
+    
+    /* Loops over units */ 
+    for ( i=0 ; i<nUnits ; i++ ) {
+      /* Unit data */ 
+      nTimesUnit = Timings(i) - 1;
+      arma::mat X_tmp1(nTimesUnit,J);
+      arma::mat X_tmp2(nTimesUnit,J);
+      arma::vec kappa_tmp(nTimesUnit); 
+      for ( t=0 ; t<nTimesUnit ; t++ ) {
+        kappa_tmp(t) = kappa(t,i,d);
+        for ( j=0 ; j<J ; j++ ) {
+          X_tmp1(t,j) = X(t,i,j);
+          X_tmp2(t,j) = X(t,i,j)*omega(t,i,d);
+        }
+      }
+      /* Add to the mean/precision */ 
+      betaMu   += X_tmp1.t() * kappa_tmp;
+      betaPrec += X_tmp1.t() * X_tmp2;
+    }
+    
+    /* Prior contribution */ 
+    for ( j=0 ; j<J ; j++ ) {
+      betaPrec(j,j) += 0.001;
+    }
+    
+    /* Draw new value */
+    betaNew = rueMVnorm( betaMu, betaPrec, beta.col(d) );
+    for ( j=0 ; j<J ; j++ ) {
+      beta(j,d) = betaNew(j);
+    }
+    
+  } /* End of loop over outcomes */
+    
 }
 
 
@@ -504,3 +690,64 @@ int multinomial_lse (const arma::vec &qvec) {
   return(idx);
 }
 
+
+
+/* Polya-gamma latent variables in parallel */
+void pg_gibbs_parallel( const arma::ucube &omega_omp_idx, std::vector<std::mt19937> &generator,
+                        const arma::cube &Lf, arma::cube &omega, const arma::uvec &omega_omp_loop )
+{
+  int i;
+  int nCores = omega_omp_idx.n_slices;
+  
+  #pragma omp parallel for 
+  for ( i=0 ; i<nCores ; i++ ) {
+    
+    unsigned int j;
+    int idx_unit, idx_time, idx_outcome, idx_n;
+    for ( j=0 ; j<omega_omp_loop(i) ; j++ ) {
+      idx_outcome = omega_omp_idx(j,0,i); 
+      idx_unit    = omega_omp_idx(j,1,i); 
+      idx_time    = omega_omp_idx(j,2,i);
+      idx_n       = omega_omp_idx(j,3,i);
+      omega(idx_time,idx_unit,idx_outcome) = rng_polya_gamma( generator[i], idx_n, Lf(idx_time,idx_unit,idx_outcome) );
+    }
+    
+  }
+  
+}
+
+
+
+/* CRT latent variables in parallel */ 
+void crt_gibbs_parallel( const arma::ucube &crt_omp_idx, std::vector<std::mt19937> &generator, const arma::vec &xi, 
+                         const arma::cube &Lf, arma::ucube &crt, const arma::uvec &crt_omp_loop )
+{
+  
+  int i;
+  int nCores = crt_omp_idx.n_slices;
+
+  
+  #pragma omp parallel for 
+  for ( i=0 ; i<nCores ; i++ ) {
+    
+    double tmp0, tmp2;
+    unsigned int p, j;
+    int tmp1, idx_unit, idx_time, idx_outcome, idx_w, idx_z;
+    for ( j=0 ; j<crt_omp_loop(i) ; j++ ) {
+      idx_outcome = crt_omp_idx(j,0,i); 
+      idx_unit    = crt_omp_idx(j,1,i); 
+      idx_time    = crt_omp_idx(j,2,i);
+      idx_w       = crt_omp_idx(j,3,i);
+      idx_z       = crt_omp_idx(j,4,i);
+      tmp0        = idx_w * exp( Lf(idx_time,idx_unit,idx_outcome) ) / xi(idx_outcome) ;
+      tmp1        = 0;
+      for ( p=0 ; p<idx_z ; p++ ){
+        tmp2 = tmp0/(tmp0+p);
+        tmp1 += rng_binomial( generator[i], 1, tmp2);
+      }
+      crt(idx_time,idx_unit,idx_outcome) = tmp1;
+    }
+    
+  }
+      
+}

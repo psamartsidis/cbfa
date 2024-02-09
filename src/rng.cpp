@@ -1,30 +1,19 @@
+
 /*
- * This file implements the Polya-gamma sampler PG(1,z).
- * This is a C++ implementation of Algorithm 6 in PhD thesis of Jesse 
- * Bennett Windle, 2013
- * URL: https://repositories.lib.utexas.edu/bitstream/handle/2152/21842/WINDLE-DISSERTATION-2013.pdf?sequence=1
- *
- * References:
- *
- *   Jesse Bennett Windle
- *   Forecasting High-Dimensional, Time-Varying Variance-Covariance Matrices
- *   with High-Frequency Data and Sampling Polya-Gamma Random Variates for
- *   Posterior Distributions Derived from Logistic Likelihoods  
- *   PhD Thesis, 2013   
- *
- *   Damien, P. & Walker, S. G. Sampling Truncated Normal, Beta, and Gamma Densities 
- *   Journal of Computational and Graphical Statistics, 2001, 10, 206-215
- *
- *   Chung, Y.: Simulation of truncated gamma variables 
- *   Korean Journal of Computational & Applied Mathematics, 1998, 5, 601-610
- *
- * (c) Copyright Enes Makalic and Daniel F Schmidt, 2018
+ * Functions to generate from the Polya-Gamma distribution were 
+ * taken from pgdraw package. Therefore, credits go to DF Schmidt and E Makalic
+ * The method was developed by JB Windle
  */
 
-//#include <omp.h>
 
+
+#include <random>
+#include <vector>
+#include <iostream>
 #include <Rcpp.h>
 using namespace Rcpp;
+
+
 
 // Mathematical constants computed using Wolfram Alpha
 #define MATH_PI        3.141592653589793238462643383279502884197169399375105820974
@@ -38,30 +27,67 @@ using namespace Rcpp;
 #define MATH_LOG_2_PI  -0.45158270528945486472619522989488214357179467855505631739
 #define MATH_LOG_PI_2  0.451582705289454864726195229894882143571794678555056317392
 
-// FCN prototypes
-double samplepg(double);
-double exprnd(double);
-double tinvgauss(double, double);
-double truncgamma();
-double randinvg(double);
-double aterm2(int, double, double);
+
+
+double samplepg( std::mt19937 &, double );
+double rng_exp( std::mt19937 &, double );
+double tinvgauss( std::mt19937 &, double, double );
+double truncgamma( std::mt19937 & );
+double randinvg( std::mt19937 &, double );
+double aterm( int, double, double );
 
 
 
-double  pgcpp( int b, double c)
+/* Uniform RNG */ 
+double rng_unif( std::mt19937 &generator, double lower, double upper ) 
 {
-	double y=0.0;
-  for ( int j=0 ; j<b ; j++ ){
-    y += samplepg(c);
-  }
-	return y;
+  std::uniform_real_distribution<double> dist(lower,upper); 
+  return dist(generator);
 }
 
 
-// Sample PG(1,z)
-// Based on Algorithm 6 in PhD thesis of Jesse Bennett Windle, 2013
-// URL: https://repositories.lib.utexas.edu/bitstream/handle/2152/21842/WINDLE-DISSERTATION-2013.pdf?sequence=1
-double samplepg(double z)
+
+/* Binomial RNG */ 
+int rng_binomial( std::mt19937 &generator, int n, double p ) 
+{
+  std::binomial_distribution<int> dist(n,p); 
+  return dist(generator);
+}
+
+
+
+/* Normal RNG */
+double rng_normal( std::mt19937 &generator, double mean, double sd )
+{
+  std::normal_distribution<double> dist(mean,sd);
+  return dist(generator);
+}
+
+
+
+/* Gamma RNG */
+/* We will use the (Bayesian) shape/rate parametrisation */
+double rng_gamma( std::mt19937 &generator, double shape, double rate )
+{
+  std::gamma_distribution<double> dist(shape,1.0/rate);
+  return dist(generator);
+}
+
+
+/* Polya-gamma RNG */
+double rng_polya_gamma( std::mt19937 &generator, int b, double c )
+{
+  double y=0.0;
+  for ( int j=0 ; j<b ; j++ ){
+    y += samplepg( generator, c );
+  }
+  return y;
+}
+
+
+
+/* PG(1,z), Algorith 6 in PhD thesis of JB Windle (2013) */
+double samplepg( std::mt19937 &generator, double z)
 {
   //  PG(b, z) = 0.25 * J*(b, z/2)
   z = (double)std::fabs((double)z) * 0.5;
@@ -71,43 +97,43 @@ double samplepg(double z)
   
   // Compute p, q and the ratio q / (q + p)
   // (derived from scratch; derivation is not in the original paper)
-  double K = z*z/2.0 + MATH_PI2/8.0;
+  double K    = z*z/2.0 + MATH_PI2/8.0;
   double logA = (double)std::log(4.0) - MATH_LOG_PI - z;
   double logK = (double)std::log(K);
-  double Kt = K * t;
-  double w = (double)std::sqrt(MATH_PI_2);
-
+  double Kt   = K * t;
+  double w    = (double)std::sqrt(MATH_PI_2);
+  
   double logf1 = logA + R::pnorm(w*(t*z - 1),0.0,1.0,1,1) + logK + Kt;
   double logf2 = logA + 2*z + R::pnorm(-w*(t*z+1),0.0,1.0,1,1) + logK + Kt;
   double p_over_q = (double)std::exp(logf1) + (double)std::exp(logf2);
   double ratio = 1.0 / (1.0 + p_over_q); 
-
+  
   double u, X;
-
+  
   // Main sampling loop; page 130 of the Windle PhD thesis
   while(1) 
   {
     // Step 1: Sample X ? g(x|z)
-    u = R::runif(0.0,1.0);
+    u = rng_unif( generator, 0.0, 1.0 );
     if(u < ratio) {
       // truncated exponential
-      X = t + exprnd(1.0)/K;
+      X = t + rng_exp(generator,1.0)/K;
     }
     else {
       // truncated Inverse Gaussian
-      X = tinvgauss(z, t);
+      X = tinvgauss( generator, z, t);
     }
-
+    
     // Step 2: Iteratively calculate Sn(X|z), starting at S1(X|z), until U ? Sn(X|z) for an odd n or U > Sn(X|z) for an even n
     int i = 1;
-    double Sn = aterm2(0, X, t);
-    double U = R::runif(0.0,1.0) * Sn;
+    double Sn = aterm(0, X, t);
+    double U = rng_unif(generator,0.0,1.0) * Sn;
     int asgn = -1;
     bool even = false;
-
+    
     while(1) 
     {
-      Sn = Sn + asgn * aterm2(i, X, t);
+      Sn = Sn + asgn * aterm(i, X, t);
       
       // Accept if n is odd
       if(!even && (U <= Sn)) {
@@ -129,11 +155,13 @@ double samplepg(double z)
 }
 
 // Generate exponential distribution random variates
-double exprnd(double mu)
+double rng_exp( std::mt19937 &generator, double mu )
 {
-	return -mu * (double)std::log(1.0 - (double)R::runif(0.0,1.0));
+  return -mu * (double)std::log(1.0 - (double)rng_unif(generator,0.0,1.0) );
 }
 
+ 
+ 
 // Function a_n(x) defined in equations (12) and (13) of
 // Bayesian inference for logistic models using Polya-Gamma latent variables
 // Nicholas G. Polson, James G. Scott, Jesse Windle
@@ -141,7 +169,7 @@ double exprnd(double mu)
 //
 // Also found in the PhD thesis of Windle (2013) in equations
 // (2.14) and (2.15), page 24
-double aterm2(int n, double x, double t)
+double aterm(int n, double x, double t)
 {
   double f = 0;
   if(x <= t) {
@@ -153,24 +181,28 @@ double aterm2(int n, double x, double t)
   return (double)exp(f);
 }
 
+
+
 // Generate inverse gaussian random variates
-double randinvg(double mu)
+double randinvg( std::mt19937 &generator, double mu )
 {
   // sampling
-  double u = R::rnorm(0.0,1.0);
+  double u = rng_normal(generator,0.0,1.0);
   double V = u*u;
   double out = mu + 0.5*mu * ( mu*V - (double)std::sqrt(4.0*mu*V + mu*mu * V*V) );
   
-  if(R::runif(0.0,1.0) > mu /(mu+out)) {    
+  if(rng_unif(generator,0.0,1.0) > mu /(mu+out)) {    
     out = mu*mu / out; 
   }    
   return out;
 }
 
+
+
 // Sample truncated gamma random variates
 // Ref: Chung, Y.: Simulation of truncated gamma variables 
 // Korean Journal of Computational & Applied Mathematics, 1998, 5, 601-610
-double truncgamma()
+double truncgamma( std::mt19937 &generator )
 {
   double c = MATH_PI_2;
   double X, gX;
@@ -178,10 +210,10 @@ double truncgamma()
   bool done = false;
   while(!done)
   {
-    X = exprnd(1.0) * 2.0 + c;
+    X = rng_exp(generator,1.0) * 2.0 + c;
     gX = MATH_SQRT_PI_2 / (double)std::sqrt(X);
     
-    if(R::runif(0.0,1.0) <= gX) {
+    if(rng_unif(generator,0.0,1.0) <= gX) {
       done = true;
     }
   }
@@ -191,7 +223,7 @@ double truncgamma()
 
 // Sample truncated inverse Gaussian random variates
 // Algorithm 4 in the Windle (2013) PhD thesis, page 129
-double tinvgauss(double z, double t)
+double tinvgauss( std::mt19937 &generator, double z, double t )
 {
   double X, u;
   double mu = 1.0/z;
@@ -201,10 +233,10 @@ double tinvgauss(double z, double t)
     // Sampler based on truncated gamma 
     // Algorithm 3 in the Windle (2013) PhD thesis, page 128
     while(1) {
-	  u = R::runif(0.0, 1.0);
-      X = 1.0 / truncgamma();
+      u = rng_unif(generator,0.0, 1.0);
+      X = 1.0 / truncgamma(generator);
       
-	  if ((double)std::log(u) < (-z*z*0.5*X)) {
+      if ((double)std::log(u) < (-z*z*0.5*X)) {
         break;
       }
     }
@@ -213,7 +245,7 @@ double tinvgauss(double z, double t)
     // Rejection sampler
     X = t + 1.0;
     while(X >= t) {
-      X = randinvg(mu);
+      X = randinvg(generator,mu);
     }
   }    
   return X;
