@@ -10,8 +10,6 @@
 #include "rng.h"
 #ifdef _OPENMP
   #include <omp.h>
-#else
-  #define omp_get_thread_num() 0
 #endif
 
 
@@ -21,8 +19,8 @@
 // [[Rcpp::depends(RcppArmadillo)]]
 // [[Rcpp::plugins(openmp)]]
 
-using namespace std;
-using namespace Rcpp;
+//using namespace std;
+using Rcpp::Rcout;
 using namespace arma;
 
 
@@ -308,8 +306,8 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   
   
   /* Dataset parameters */ 
-  int nTimes = n.n_rows;
-  int nUnits = n.n_cols;
+  int nTimes = X.n_rows;
+  int nUnits = X.n_cols;
   int D1     = y.n_slices;  /* # continuous outcomes */
   int D2     = n.n_slices;  /* # binomial outcomes */ 
   int J      = X.n_slices;  /* # covariates */ 
@@ -340,7 +338,6 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   L *= 0.001;
   arma::cube L_mcmc(nUnits,P,nSaves);
 
-  
   /* Loadings shrinkage parameters */
   double gamma = R::rgamma( tpb_prior(5), 1.0/tpb_prior(6) );
   double eta   = R::rgamma( tpb_prior(4), 1.0/gamma );
@@ -362,7 +359,7 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   
   /* Normal outcome variance */
   arma::mat sigma(nUnits,D1);
-  sigma.fill(1.0);
+  sigma.fill(0.1);
   arma::cube sigma_mcmc(nUnits,D1,nSaves);
   
   
@@ -376,17 +373,16 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   arma::cube f_binom(nTimes,P,D2,fill::randn);
   f_binom *= 0.001;
   arma::cube f_binom_mcmc(nTimes,P*D2,nSaves);
+  Rcout << "MCMC iteration " << 1 << "\n";
   
   
   /* Regression coefficients */
   arma::mat beta_normal(J,D1,fill::value(0.0));
-  beta_normal(0,0) = 1.0; beta_normal(4,0) = -2.0; beta_normal(9,0)=0.75;
-  beta_normal(1,1) = 0.8; beta_normal(5,1) = -2.5; beta_normal(8,1)=1.75;
   arma::cube beta_normal_mcmc(J,D1,nSaves,fill::value(0.0));
   arma::mat beta_binom(J,D2,fill::value(0.0));
   arma::cube beta_binom_mcmc(J,D2,nSaves,fill::value(0.0));
 
-  
+
   /* PG latent variables */ 
   arma::cube omega(nTimes,nUnits,D2);
   omega.fill(0.0); 
@@ -405,7 +401,7 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
     }
   }
   
-  
+  Rcout << "MCMC iteration " << 1 << "\n";
   /* Loadings-factors product */
   arma::cube Lf_normal(nTimes,nUnits,D1);
   arma::cube y_minus_Xb(nTimes,nUnits,D1);
@@ -418,7 +414,7 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   arma::cube mu_binom(nTimes,nUnits,D2);
   update_kappa( omega, kappa, X, beta_binom, L, f_binom, Lf_binom, kappa_minus_Xb, kappa_minus_Lf, mu_binom );
   
-  
+  Rcout << "MCMC iteration " << 1 << "\n";
   
   /* Factors variance parameters */ 
   arma::mat psi_normal(P,D1,fill::value(1.0)); 

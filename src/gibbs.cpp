@@ -9,13 +9,10 @@
 #include <iostream>
 #ifdef _OPENMP
   #include <omp.h>
-#else
-  #define omp_get_thread_num() 0
 #endif
 using namespace Rcpp;
 using namespace arma;
 
-// [[Rcpp::plugins(openmp)]]
 
 
 double factor_variance( const arma::vec &, double , double );
@@ -699,7 +696,9 @@ void pg_gibbs_parallel( const arma::ucube &omega_omp_idx, std::vector<std::mt199
   int i;
   int nCores = omega_omp_idx.n_slices;
   
+  #ifdef _OPENMP 
   #pragma omp parallel for 
+  #endif
   for ( i=0 ; i<nCores ; i++ ) {
     
     unsigned int j;
@@ -727,7 +726,9 @@ void crt_gibbs_parallel( const arma::ucube &crt_omp_idx, std::vector<std::mt1993
   int nCores = crt_omp_idx.n_slices;
 
   
+  #ifdef _OPENMP 
   #pragma omp parallel for 
+  #endif
   for ( i=0 ; i<nCores ; i++ ) {
     
     double tmp0, tmp2;

@@ -11,7 +11,6 @@
 #include <vector>
 #include <iostream>
 #include <Rcpp.h>
-using namespace Rcpp;
 
 
 

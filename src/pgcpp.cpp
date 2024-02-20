@@ -21,7 +21,6 @@
  * (c) Copyright Enes Makalic and Daniel F Schmidt, 2018
  */
 
-//#include <omp.h>
 
 #include <Rcpp.h>
 using namespace Rcpp;

@@ -1,5 +1,5 @@
 rm(list=ls())
-Sys.setenv("PKG_CXXFLAGS"="-fopenmp -std=c++11 -Wall")
+Sys.setenv("PKG_CXXFLAGS"="-fopenmp -std=c++11 -Wall -Wno-sign-compare -O2")
 library(Rcpp)
 sourceCpp('./src/cbfa.cpp')
 load('./R/dataset_vignette.RData')
