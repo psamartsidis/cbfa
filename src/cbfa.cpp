@@ -10,6 +10,7 @@
 #include "rng.h"
 #ifdef _OPENMP
   #include <omp.h>
+// [[Rcpp::plugins(openmp)]]
 #endif
 
 
@@ -17,9 +18,8 @@
 // RcppArmadillo so that the build process will know what to do
 //
 // [[Rcpp::depends(RcppArmadillo)]]
-// [[Rcpp::plugins(openmp)]]
+// [[Rcpp::plugins("cpp11")]]
 
-//using namespace std;
 using Rcpp::Rcout;
 using namespace arma;
 
@@ -34,7 +34,7 @@ Rcpp::List cbfa( int nMCMC, int nBurn, int nThin, int window, int P,
   
   
   /* Dataset parameters */ 
-  int nTimes = n.n_rows;
+  unsigned int nTimes = n.n_rows;
   int nUnits = n.n_cols;
   int D1     = y.n_slices;  /* # continuous outcomes */
   int D2     = n.n_slices;  /* # binomial outcomes */ 
@@ -50,7 +50,6 @@ Rcpp::List cbfa( int nMCMC, int nBurn, int nThin, int window, int P,
   /* Set up OPENMP */
   int nCores=nCores0;
   #ifndef _OPENMP
-    nCores = 1;
   #else 
     omp_set_num_threads(nCores);
   #endif
@@ -60,6 +59,15 @@ Rcpp::List cbfa( int nMCMC, int nBurn, int nThin, int window, int P,
   for (auto &gen : generators) {
     gen.seed(dist(rng_host));
   }
+  Rcout << "Cores used: " << nCores << "\n";
+  #ifdef _OPENMP 
+  #pragma omp parallel for 
+  #endif
+  for ( i=0 ; i<nCores ; i++ ){
+    Rcout << "Core saying hi: " << omp_get_thread_num() << "\n";
+    Rcout << "Cores used: " << omp_get_num_threads() << "\n";
+  }
+  R_FlushConsole();
 
   
   /* Loadings parameters */ 
@@ -306,7 +314,7 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   
   
   /* Dataset parameters */ 
-  int nTimes = X.n_rows;
+  unsigned int nTimes = X.n_rows;
   int nUnits = X.n_cols;
   int D1     = y.n_slices;  /* # continuous outcomes */
   int D2     = n.n_slices;  /* # binomial outcomes */ 
@@ -314,7 +322,8 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   
 
   /* Some other helpful variables */
-  int t, d, i, p;
+  int d, i, p;
+  unsigned int t;
   int nSaves = nMCMC/nThin;
   
   
@@ -373,8 +382,7 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   arma::cube f_binom(nTimes,P,D2,fill::randn);
   f_binom *= 0.001;
   arma::cube f_binom_mcmc(nTimes,P*D2,nSaves);
-  Rcout << "MCMC iteration " << 1 << "\n";
-  
+
   
   /* Regression coefficients */
   arma::mat beta_normal(J,D1,fill::value(0.0));
@@ -401,7 +409,7 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
     }
   }
   
-  Rcout << "MCMC iteration " << 1 << "\n";
+
   /* Loadings-factors product */
   arma::cube Lf_normal(nTimes,nUnits,D1);
   arma::cube y_minus_Xb(nTimes,nUnits,D1);
@@ -414,8 +422,7 @@ Rcpp::List cbfa_conjugate( int nMCMC, int nBurn, int nThin, int P,
   arma::cube mu_binom(nTimes,nUnits,D2);
   update_kappa( omega, kappa, X, beta_binom, L, f_binom, Lf_binom, kappa_minus_Xb, kappa_minus_Lf, mu_binom );
   
-  Rcout << "MCMC iteration " << 1 << "\n";
-  
+
   /* Factors variance parameters */ 
   arma::mat psi_normal(P,D1,fill::value(1.0)); 
   arma::mat psi_binom( P,D2, fill::value(1.0));

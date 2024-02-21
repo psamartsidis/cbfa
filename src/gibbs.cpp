@@ -25,7 +25,8 @@ void pg_gibbs( const arma::ucube &n, const arma::cube &Lf_binom, arma::cube &ome
   
   int nUnits = omega.n_cols;
   int D2     = omega.n_slices;
-  int d, t, i;
+  int d, i;
+  unsigned int t;
   
   for ( d=0 ; d<D2 ; d++) {
     for (i=0 ; i<nUnits ; i++) {
@@ -55,13 +56,13 @@ void crt_gibbs( const arma::vec &xi, const arma::uvec &Timings, const arma::ucub
   
   for ( int d=0 ; d<D ; d++ ){
     for ( int i=0 ; i<nUnits ; i++ ){
-      for ( int t=0 ; t<Timings(i)-1 ; t++ ) {
+      for ( unsigned int t=0 ; t<Timings(i)-1 ; t++ ) {
         
         if (w(t,i,d)>0) {
           tmp1 = 0;
-          for ( int p=0 ; p<z(t,i,d); p++ ) {
+          for ( unsigned int p=0 ; p<z(t,i,d); p++ ) {
             tmp0 = w(t,i,d) * exp(Lf(t,i,d)) / xi(d);
-            tmp2 = tmp0/(tmp0+p);
+            tmp2 = tmp0/(tmp0+(double)p);
             tmp1 += R::rbinom(1,tmp2);
           }
           crt(t,i,d) = tmp1;
@@ -79,11 +80,12 @@ void crt_gibbs( const arma::vec &xi, const arma::uvec &Timings, const arma::ucub
 void f_binom_gibbs( const arma::mat &L, arma::cube &f, const arma::cube &kappa, const arma::mat &psi, 
                     const arma::cube &omega, const arma::uvec &Timings, const arma::uvec &nControls)
 {
-  int nTimes = f.n_rows;
+  unsigned int nTimes = f.n_rows;
   int nUnits = L.n_rows;
   int P      = f.n_cols;
   int D      = f.n_slices;
-  int p, d, i, t, idx, nUnitsTime;
+  int p, d, i, idx, nUnitsTime;
+  unsigned int t;
   arma::vec f_new(P);
   arma::vec f_mu(P);
   arma::mat f_prec(P,P);
@@ -135,10 +137,11 @@ void f_normal_gibbs( const arma::uvec &nControls, const arma::uvec &Timings, con
                      const arma::mat &sigma, const arma::mat &psi, arma::cube &f )
 {
   int P      = f.n_cols;
-  int nTimes = f.n_rows;
+  unsigned int nTimes = f.n_rows;
   int D      = f.n_slices;
   int nUnits = L.n_rows;
-  int i, d, t, p, idx, nUnitsTime;
+  int i, d, p, idx, nUnitsTime;
+  unsigned int t;
   arma::vec f_new(P);
   arma::vec f_mu(P);
   arma::mat f_prec(P,P);
@@ -733,7 +736,8 @@ void crt_gibbs_parallel( const arma::ucube &crt_omp_idx, std::vector<std::mt1993
     
     double tmp0, tmp2;
     unsigned int p, j;
-    int tmp1, idx_unit, idx_time, idx_outcome, idx_w, idx_z;
+    int tmp1, idx_unit, idx_time, idx_outcome, idx_w;
+    unsigned int idx_z;
     for ( j=0 ; j<crt_omp_loop(i) ; j++ ) {
       idx_outcome = crt_omp_idx(j,0,i); 
       idx_unit    = crt_omp_idx(j,1,i); 
@@ -743,7 +747,7 @@ void crt_gibbs_parallel( const arma::ucube &crt_omp_idx, std::vector<std::mt1993
       tmp0        = idx_w * exp( Lf(idx_time,idx_unit,idx_outcome) ) / xi(idx_outcome) ;
       tmp1        = 0;
       for ( p=0 ; p<idx_z ; p++ ){
-        tmp2 = tmp0/(tmp0+p);
+        tmp2 = tmp0/(tmp0+(double)p);
         tmp1 += rng_binomial( generator[i], 1, tmp2);
       }
       crt(idx_time,idx_unit,idx_outcome) = tmp1;
