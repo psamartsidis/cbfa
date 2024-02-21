@@ -59,15 +59,6 @@ Rcpp::List cbfa( int nMCMC, int nBurn, int nThin, int window, int P,
   for (auto &gen : generators) {
     gen.seed(dist(rng_host));
   }
-  Rcout << "Cores used: " << nCores << "\n";
-  #ifdef _OPENMP 
-  #pragma omp parallel for 
-  #endif
-  for ( i=0 ; i<nCores ; i++ ){
-    Rcout << "Core saying hi: " << omp_get_thread_num() << "\n";
-    Rcout << "Cores used: " << omp_get_num_threads() << "\n";
-  }
-  R_FlushConsole();
 
   
   /* Loadings parameters */ 
