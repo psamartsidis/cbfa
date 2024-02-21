@@ -13,12 +13,8 @@
 // [[Rcpp::plugins(openmp)]]
 #endif
 
-
-// via the depends attribute we tell Rcpp to create hooks for
-// RcppArmadillo so that the build process will know what to do
-//
 // [[Rcpp::depends(RcppArmadillo)]]
-// [[Rcpp::plugins("cpp11")]]
+//// [[Rcpp::plugins("cpp11")]]
 
 using Rcpp::Rcout;
 using namespace arma;
