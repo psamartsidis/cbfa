@@ -29,7 +29,7 @@ tpb[7] = 0.1
 set.seed(123)
 St = Sys.time()
 fit = cbfa( nMCMC=nMCMC, nBurn=nBurn*nThin, nThin=nThin, window=100, P=20, y=y, n=n, k=k, w=w, z=z, Timings=Timings,
-            SMAX=10, tpb_prior=tpb, tpb_nBurn=1000, nCores0=7, seed=129 )
+            SMAX=10, tpb_prior=tpb, tpb_nBurn=1000, nCores0=4, seed=129 )
 Fn = Sys.time()
 Fn-St
 
